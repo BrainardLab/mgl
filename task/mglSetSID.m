@@ -29,6 +29,9 @@
 %             To list all subjects:
 %             mglSetSID('list');
 %
+%             Or list subjects added after a certain date
+%             mglSetSID('list','listStartDate=Jan 1, 2015')
+%
 %             To remove a subject
 %             mglSetSID('s999','remove');
 %
@@ -97,8 +100,9 @@ force = false;
 edit  = false;
 remove = false;
 private = [];
+listStartDate = [];
 if (nargin > 1) && mglIsMrToolsLoaded
-  getArgs(varargin,{'force=0','edit=0','private=[]','remove=0'});
+  getArgs(varargin,{'force=0','edit=0','private=[]','remove=0','listStartDate=[]'});
 end
 
 % FIX, FIX, FIX
@@ -172,7 +176,9 @@ elseif (isstr(sid)  && (length(sid) >= 4) && (sid(1) == 's') && ~isempty(sid(2:e
 % check if it is an edit command
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 elseif isequal(sid,'edit')
-  editSIDDatabase
+  disp(sprintf('(mglSetSID) Edit feature disabled - possibly busted - and sucks anyway'));
+  % something wrong with the ethnicity fields do not seem to be in the right column
+  %editSIDDatabase
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % add an entry
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -182,7 +188,7 @@ elseif isequal(sid,'add')
 % list all entries
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 elseif isequal(sid,'list')
-  listSID(private);
+  listSID(private,listStartDate);
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % see if it is a subject name
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -286,6 +292,7 @@ if ~isempty(params)
   end
   % set the dateAdded
   sidDatabase.dateAdded{end+1} = datestr(now);
+  keyboard
   % save it back
   saveSIDDatabase(sidDatabase);
   % release lock
@@ -361,7 +368,7 @@ if ~force
   if ~strcmp(lower(sidStr),'test')
     % otherwise, get database name
     sidDatabaseSID = mlrReplaceTilde(setext(mglGetParam('sidDatabaseFilename'),'mat',0));
-    if ~isfile(sidDatabaseSID)
+    if ~mglIsFile(sidDatabaseSID)
       disp(sprintf('(mglSetSID) Could not find SID file %s, so cannot validate',sidDatabaseSID));
     else
       % load it
@@ -497,7 +504,7 @@ sidDatabaseDecrypt = setext(sidDatabaseFilename,'csv',0);
 global requiredFields;
 
 % check if data base exists
-if ~isfile(sidDatabaseFilename)
+if ~mglIsFile(sidDatabaseFilename)
   if askuser(sprintf('(mglSetSID) Could not find SID Database file %s, create one from scratch?',sidDatabaseFilename))
     for iField = 1:length(requiredFields)
       % check if default is a cell
@@ -517,7 +524,7 @@ end
 % load unencrypted part of database that does not contain
 % any personal identifiers
 sidDatabaseFilenameUnencrypted = mlrReplaceTilde(setext(mglGetParam('sidDatabaseFilename'),'mat',0));
-if ~isfile(sidDatabaseFilenameUnencrypted)
+if ~mglIsFile(sidDatabaseFilenameUnencrypted)
   disp(sprintf('(mglSetSID) !!! Could not find unencrypted dataabase that contains info devoid of personal identifiers. Will try to load from encrypted database'));
 else
   unencrypted = load(sidDatabaseFilenameUnencrypted);
@@ -603,7 +610,7 @@ if isempty(sidDatabaseFilename)
 end
 
 % check if data base exists
-if ~isfile(sidDatabaseFilename)
+if ~mglIsFile(sidDatabaseFilename)
   disp(sprintf('(mglSetSID) Could not find SID database file %s',sidDatabaseFilename));
   
   if (~askuser(sprintf('(mglSetSID) Create SID database file: %s',sidDatabaseFilename)))
@@ -780,6 +787,17 @@ end
 
 % save the database
 if ~isempty(params)
+  % check for repeat by first/last name
+  firstIdx = cellfun(@(x) strcmp(x,params.firstName),sidDatabase.firstName);
+  lastIdx = cellfun(@(x) strcmp(x,params.lastName),sidDatabase.lastName);
+  idx = firstIdx .* lastIdx;
+  if any(idx)
+    sid = sidDatabase.sid{logical(idx)};
+    warndlg(sprintf('Subject %s %s is already in the database with subject ID %s',params.firstName,params.lastName,sid));
+    releaseLock(true);
+    return
+  end
+    
   % add the subject to the database
   for iField = 1:length(requiredFields)
     % convert sid, which is a number into a sid string
@@ -807,7 +825,7 @@ end
 %%%%%%%%%%%%%%%%
 %    listSID   %
 %%%%%%%%%%%%%%%%
-function listSID(private)
+function listSID(private,listStartDate)
 
 global gMaxSID;
 
@@ -826,6 +844,38 @@ releaseLock;
 % check for problem opening database
 if isempty(sidDatabase),return,end
 
+% select out database entries that match listStartYear parameter
+if ~isempty(listStartDate)
+  % display what we are doing
+  disp(sprintf('(mglSetSID) Removing entries that were entered before: %s',listStartDate));
+  dispHeader('drop list');
+  % cycle through looking at dates
+  keepList = [];
+  for iSID = 1:length(sidDatabase.sid)
+    if datenum(sidDatabase.dateAdded{iSID})>datenum(listStartDate)
+      % keep this one
+      keepList(end+1) = iSID;
+    else
+      % display that we are dropping the following sid
+      dispSID(sidDatabase,iSID);
+    end
+  end
+  % check for empty
+  if isempty(keepList)
+    disp(sprintf('(mglSetSID) No matching entries'));
+    return
+  end
+  % now just keep the ones in the keepList
+  allFields = fieldnames(sidDatabase);
+  for iField = 1:length(allFields)
+    % subset all fields that have more than one entry 
+    % i.e. ones that are per-subject
+    if length(sidDatabase.(allFields{iField})) > 1
+      sidDatabase.(allFields{iField}) = {sidDatabase.(allFields{iField}){keepList}};
+    end
+  end
+  dispHeader(sprintf('List of entries since: %s',listStartDate));
+end
 % get postfix
 if ~isempty(private)
   postfix = getPostfix(sidDatabase,private);
@@ -840,6 +890,94 @@ end
 % display all entries
 for iSID = 1:length(sidDatabase.sid)
   dispSID(sidDatabase,iSID);
+end
+
+% compute statistics
+
+% number of subjects
+stats.n = length(sidDatabase.sid)
+
+% number of male and female
+stats.f = sum(strcmp('f',lower(sidDatabase.gender)));
+stats.m = sum(strcmp('m',lower(sidDatabase.gender)));
+
+% ethnicity
+stats.ethnicity = unique(lower(sidDatabase.ethnicity));
+for iEthnicity = 1:length(stats.ethnicity)
+  stats.ethnicityN(iEthnicity) = sum(strcmp(stats.ethnicity{iEthnicity},lower(sidDatabase.ethnicity)));
+end
+
+% race
+stats.race = unique(lower({sidDatabase.race{:} sidDatabase.otherRace1{:} sidDatabase.otherRace2{:} sidDatabase.otherRace3{:} sidDatabase.otherRace4{:}}));
+for iRace = 1:length(stats.race)
+  stats.raceN(iRace) = sum(strcmp(stats.race{iRace},lower(sidDatabase.race)));
+  stats.otherRace1N(iRace) = sum(strcmp(stats.race{iRace},lower(sidDatabase.otherRace1)));
+  stats.otherRace2N(iRace) = sum(strcmp(stats.race{iRace},lower(sidDatabase.otherRace2)));
+  stats.otherRace3N(iRace) = sum(strcmp(stats.race{iRace},lower(sidDatabase.otherRace3)));
+  stats.otherRace4N(iRace) = sum(strcmp(stats.race{iRace},lower(sidDatabase.otherRace4)));
+end
+
+% count number of declines
+declineRace = strcmp('n/a',lower(sidDatabase.race)) | strcmp('decline',lower(sidDatabase.race));
+declineRace1 = strcmp('n/a',lower(sidDatabase.otherRace1)) | strcmp('decline',lower(sidDatabase.otherRace1));
+declineRace2 = strcmp('n/a',lower(sidDatabase.otherRace2)) | strcmp('decline',lower(sidDatabase.otherRace2));
+declineRace3 = strcmp('n/a',lower(sidDatabase.otherRace3)) | strcmp('decline',lower(sidDatabase.otherRace3));
+declineRace4 = strcmp('n/a',lower(sidDatabase.otherRace4)) | strcmp('decline',lower(sidDatabase.otherRace4));
+stats.raceDeclineTotal = sum(declineRace & declineRace1 & declineRace2 & declineRace4);
+
+% count races across all fields
+stats.raceTotal = stats.raceN + stats.otherRace1N + stats.otherRace2N + stats.otherRace3N + stats.otherRace4N;
+
+
+% get age in years
+for iSID = 1:stats.n
+  if ~isempty(sidDatabase.dob{iSID})
+    age = datevec(datenum(now)-datenum(sidDatabase.dob{iSID}));
+    stats.age(iSID) = age(1);
+    if stats.age(iSID) > 120
+      stats.age(iSID) = nan;
+    end
+  else
+    stats.age(iSID) = nan;
+  end
+end
+
+% display statistics
+dispHeader('Gender');
+disp(sprintf('Total n: %i',stats.n));
+disp(sprintf('Female: %i (%0.2f%%)',stats.f,100*stats.f/stats.n));
+disp(sprintf('Male: %i (%0.2f%%)',stats.m,100*stats.m/stats.n));
+disp(sprintf('Decline: %i (%0.2f%%)',stats.n-(stats.m+stats.f),100*(stats.n-(stats.m+stats.f))/stats.n));
+dispHeader('Ethnicity');
+for iEthnicity = 1:length(stats.ethnicity)
+  disp(sprintf('%s: %i (%0.2f%%)',stats.ethnicity{iEthnicity},stats.ethnicityN(iEthnicity),100*stats.ethnicityN(iEthnicity)/stats.n));
+end
+dispHeader('Race');
+for iRace = 1:length(stats.race)
+  disp(sprintf('%s: %i (%0.2f%%)',stats.race{iRace},stats.raceN(iRace),100*stats.raceN(iRace)/stats.n));
+end
+dispHeader('Race other 1');
+for iRace = 1:length(stats.race)
+  disp(sprintf('%s: %i (%0.2f%%)',stats.race{iRace},stats.otherRace1N(iRace),100*stats.otherRace1N(iRace)/stats.n));
+end
+dispHeader('Race other 2');
+for iRace = 1:length(stats.race)
+  disp(sprintf('%s: %i (%0.2f%%)',stats.race{iRace},stats.otherRace2N(iRace),100*stats.otherRace2N(iRace)/stats.n));
+end
+dispHeader('Race other 3');
+for iRace = 1:length(stats.race)
+  disp(sprintf('%s: %i (%0.2f%%)',stats.race{iRace},stats.otherRace3N(iRace),100*stats.otherRace3N(iRace)/stats.n));
+end
+dispHeader('Race other 4');
+for iRace = 1:length(stats.race)
+  disp(sprintf('%s: %i (%0.2f%%)',stats.race{iRace},stats.otherRace4N(iRace),100*stats.otherRace4N(iRace)/stats.n));
+end
+dispHeader('Race totals');
+disp(sprintf('Decline or n/a: %i (%0.2f%%)',stats.raceDeclineTotal, 100*stats.raceDeclineTotal/stats.n));
+for iRace = 1:length(stats.race)
+  if ~any(strcmp(lower(stats.race{iRace}),{'n/a','decline'}))
+    disp(sprintf('%s: %i (%0.2f%%)',stats.race{iRace},stats.raceN(iRace),100*stats.raceN(iRace)/stats.n));
+  end
 end
 
 %%%%%%%%%%%%%%%%%
@@ -1494,8 +1632,7 @@ for iRow = 1:size(data,1)
     % validate
     [tf fieldNum fieldName] = validateRow(data,iRow);
     if ~tf
-      warndlg(sprintf('(mglSetSID) You must set field %s for %s',fieldName,data{iRow,1}),'Missing Field','modal');
-      return
+      sprintf('(mglSetSID) Missing field: %s for %s',fieldName,data{iRow,1});
     end
   end
 end
@@ -1563,7 +1700,7 @@ if ~mglIsMrToolsLoaded,return,end
 sidDatabaseLockFilename = mlrReplaceTilde(setext(mglGetParam('sidDatabaseFilename'),'lock',0));
 
 % see if it exists
-if isfile(sidDatabaseLockFilename)
+if mglIsFile(sidDatabaseLockFilename)
   % try to load it
   [username locktime] = readlock(sidDatabaseLockFilename);
   if isempty(username),return,end
@@ -1619,7 +1756,7 @@ if nargin < 1,warnOnStolenLock = false;end
 sidDatabaseLockFilename = mlrReplaceTilde(setext(mglGetParam('sidDatabaseFilename'),'lock',0));
 
 % check if lock is there
-if ~isfile(sidDatabaseLockFilename)
+if ~mglIsFile(sidDatabaseLockFilename)
   disp(sprintf('(mglSetSID) Lock has already been removed'));
   return
 end
