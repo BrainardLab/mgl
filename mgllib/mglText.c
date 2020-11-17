@@ -21,6 +21,10 @@ $Id$
 #define DEFAULT_FONT "Times Roman"
 #define DEFAULT_FONTSIZE 36
 
+#ifndef verify_noerr
+#define verify_noerr(errorCode)  __Verify_noErr(errorCode)
+#endif
+           
 /////////////////////////
 //   OS Specific calls //
 /////////////////////////

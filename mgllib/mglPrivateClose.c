@@ -53,11 +53,17 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     return;
   }
 
+  mexPrintf("(mglPrivateClose) Before closeDisplay()\n");
+  
   // close the display
   closeDisplay(displayNumber,verbose);
 
+  mexPrintf("(mglPrivateClose) After closeDisplay()\n");
+  
   // set display number to -1
   mglSetGlobalDouble("displayNumber",-1);
+  
+  mexPrintf("(mglPrivateClose) At end of mexfile\n");
 }
 
 //-----------------------------------------------------------------------------------///
@@ -93,8 +99,9 @@ void closeDisplay(int displayNumber,int verbose)
 ////////////////////
 void cocoaClose(displayNumber,verbose)
 {
-  if (verbose) mexPrintf("(mglPrivateClose) Closing cocoa window\n");
-
+  //if (verbose) mexPrintf("(mglPrivateClose) Closing cocoa window\n");
+  mexPrintf("(mglPrivateClose) Closing cocoa window\n");
+  
   // start auto release pool
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 
@@ -102,33 +109,40 @@ void cocoaClose(displayNumber,verbose)
   NSWindow *myWindow = (NSWindow*)(unsigned long)mglGetGlobalDouble("cocoaWindowPointer");
   NSOpenGLContext *myOpenGLContext = (NSOpenGLContext*)(unsigned long)mglGetGlobalDouble("GLContext");
 
-  if (verbose) mexPrintf("(mglPrivateClose) Closing window: %x with openGLContext: %x\n",(unsigned long)myWindow,(unsigned long)myOpenGLContext);
+  //if (verbose) mexPrintf("(mglPrivateClose) Closing window: %x with openGLContext: %x\n",(unsigned long)myWindow,(unsigned long)myOpenGLContext);
+  mexPrintf("(mglPrivateClose) Closing window: %x with openGLContext: %x\n",(unsigned long)myWindow,(unsigned long)myOpenGLContext);
 
+  
   // exit full screen mode
   if (displayNumber >= 1) {
-    if (verbose) mexPrintf("(mglPrivateClose) Closing full screen mode\n");
+    //if (verbose) mexPrintf("(mglPrivateClose) Closing full screen mode\n");
+    mexPrintf("(mglPrivateClose) Closing full screen mode\n");
     [[myWindow contentView] exitFullScreenModeWithOptions:nil];
-    usleep(1000000);
+    //usleep(1000000);
+    usleep(1);
   }
 
   // display retain counts
-  if (verbose)
+  //if (verbose)
     mexPrintf("(mglPrivateClose) Retain counts are window: %i view: %i openGLContext: %i\n",[myWindow retainCount],[[myWindow contentView] retainCount],[myOpenGLContext retainCount]);
 
   // bring back task and menu bar if hidden
   if (mglGetGlobalDouble("hideTaskAndMenu")) {
-    if (verbose) mexPrintf("(mglPrivateClose) Hiding task and menu bar\n");
+    //if (verbose) mexPrintf("(mglPrivateClose) Hiding task and menu bar\n");
+    mexPrintf("(mglPrivateClose) Hiding task and menu bar\n");
     OSStatus setSystemUIModeStatus = SetSystemUIMode(kUIModeNormal,0);
   }
 
   // close the window. Note that we just orderOut (or make invisible) for now,
   // since there is some problem with actually closing and reopening
   if (mglGetGlobalDouble("hideNotClose")) {
-    if (verbose) mexPrintf("(mglPrivateClose) Hiding cocoa window\n");
+   // if (verbose) mexPrintf("(mglPrivateClose) Hiding cocoa window\n");
+    mexPrintf("(mglPrivateClose) Hiding cocoa window\n");
     [myWindow orderOut:nil];
   }
   else {
-    if (verbose) mexPrintf("(mglPrivateClose) Releasing cocoa window\n");
+    //if (verbose) mexPrintf("(mglPrivateClose) Releasing cocoa window\n");
+    mexPrintf("(mglPrivateClose) Releasing cocoa window\n");
     [[myWindow contentView] clearGLContext];
     [myWindow close];
     mglSetGlobalDouble("cocoaWindowPointer",0);
@@ -137,6 +151,7 @@ void cocoaClose(displayNumber,verbose)
 
   // drain the pool
   [pool drain];
+  mexPrintf("(mglPrivateClose) At the end\n");
 }
 
 //-----------------------------------------------------------------------------------///
